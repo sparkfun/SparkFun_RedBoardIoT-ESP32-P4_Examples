@@ -1,0 +1,20 @@
+dependencies:
+  idf:
+    version: '>=5.5.3'
+
+  waveshare/esp32_p4_platform:
+    version: "^2.0.0"
+    override_path: "../waveshare__esp32_p4_platform"
+
+  chmorgan/esp-audio-player:
+    version: "1.0.*"
+    public: true
+
+  chmorgan/esp-file-iterator:
+    version: "1.0.0"
+    public: true
+
+description: Board extras (audio/codec) for the Waveshare ESP32-P4 platform BSP
+targets:
+- esp32p4
+version: 0.1.0
