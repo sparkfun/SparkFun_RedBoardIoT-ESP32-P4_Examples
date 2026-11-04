@@ -80,6 +80,63 @@ esp_err_t app_video_main(i2c_master_bus_handle_t i2c_bus_handle)
     return esp_video_init(&cam_config);
 }
 
+#if CONFIG_CAMERA_OV5647 && !CONFIG_EXAMPLE_ENABLE_CAM_SENSOR_PIC_HFLIP
+/*
+ * The OV5647 init tables turn on the sensor's horizontal mirror, so the image comes out
+ * flipped left to right. Turning the mirror off shifts the Bayer pattern by one column,
+ * but the driver keeps reporting the mirrored order (GBRG), so the ISP would decode the
+ * wrong colors (green turns purple). Fix it by re-applying the current sensor format with
+ * the column-swapped Bayer order, then turning the mirror off.
+ *
+ * The sensor driver keeps a pointer to the format, so these must stay valid.
+ */
+static esp_cam_sensor_format_t s_unmirrored_format;
+static esp_cam_sensor_isp_info_t s_unmirrored_isp_info;
+
+static void ov5647_disable_mirror(int fd)
+{
+    esp_cam_sensor_format_t format;
+    struct v4l2_ext_controls controls;
+    struct v4l2_ext_control control[1];
+
+    if (ioctl(fd, VIDIOC_G_SENSOR_FMT, &format) != 0) {
+        ESP_LOGW(TAG, "failed to get sensor format, leaving the image mirrored");
+        return;
+    }
+
+    // Only swap the Bayer order once, even if the device is opened again
+    if (format.isp_info && (format.isp_info != &s_unmirrored_isp_info)) {
+        // memcpy because the struct has a const member
+        memcpy(&s_unmirrored_isp_info, format.isp_info, sizeof(s_unmirrored_isp_info));
+        esp_cam_sensor_bayer_pattern_t *bayer = &s_unmirrored_isp_info.isp_v1_info.bayer_type;
+        switch (*bayer) {
+        case ESP_CAM_SENSOR_BAYER_GBRG: *bayer = ESP_CAM_SENSOR_BAYER_BGGR; break;
+        case ESP_CAM_SENSOR_BAYER_BGGR: *bayer = ESP_CAM_SENSOR_BAYER_GBRG; break;
+        case ESP_CAM_SENSOR_BAYER_RGGB: *bayer = ESP_CAM_SENSOR_BAYER_GRBG; break;
+        case ESP_CAM_SENSOR_BAYER_GRBG: *bayer = ESP_CAM_SENSOR_BAYER_RGGB; break;
+        default: break;
+        }
+        s_unmirrored_format = format;
+        s_unmirrored_format.isp_info = &s_unmirrored_isp_info;
+    }
+
+    // Re-applying the format rewrites the sensor's init registers (mirror on again), so do it first
+    if (ioctl(fd, VIDIOC_S_SENSOR_FMT, &s_unmirrored_format) != 0) {
+        ESP_LOGW(TAG, "failed to set sensor format, leaving the image mirrored");
+        return;
+    }
+
+    controls.ctrl_class = V4L2_CTRL_CLASS_USER;
+    controls.count      = 1;
+    controls.controls   = control;
+    control[0].id       = V4L2_CID_HFLIP;
+    control[0].value    = 0;
+    if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &controls) != 0) {
+        ESP_LOGW(TAG, "failed to turn off the sensor mirror");
+    }
+}
+#endif
+
 int app_video_open(char *dev, video_fmt_t init_fmt)
 {
     struct v4l2_format default_format;
@@ -108,6 +165,11 @@ int app_video_open(char *dev, video_fmt_t init_fmt)
     ESP_LOGI(TAG, "driver:  %s", capability.driver);
     ESP_LOGI(TAG, "card:    %s", capability.card);
     ESP_LOGI(TAG, "bus:     %s", capability.bus_info);
+
+#if CONFIG_CAMERA_OV5647 && !CONFIG_EXAMPLE_ENABLE_CAM_SENSOR_PIC_HFLIP
+    // Must run before VIDIOC_S_FMT: setting the sensor format resets the capture format
+    ov5647_disable_mirror(fd);
+#endif
 
     memset(&default_format, 0, sizeof(struct v4l2_format));
     default_format.type = type;
@@ -142,7 +204,7 @@ int app_video_open(char *dev, video_fmt_t init_fmt)
     control[0].id       = V4L2_CID_VFLIP;
     control[0].value    = 1;
     if (ioctl(fd, VIDIOC_S_EXT_CTRLS, &controls) != 0) {
-        ESP_LOGW(TAG, "failed to mirror the frame horizontally and skip this step");
+        ESP_LOGW(TAG, "failed to flip the frame vertically and skip this step");
     }
 #endif
 
