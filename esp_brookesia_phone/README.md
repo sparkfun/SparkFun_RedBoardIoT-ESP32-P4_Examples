@@ -47,7 +47,7 @@ git clone --recursive https://github.com/espressif/esp-dev-kits.git
 
 ### Configuration
 
-This example uses ESP32-C6 by default with coprocessor firmware 2.12.2 and also supports ESP32-C5 with firmware 3.0.2. The Host uses ESP-Hosted 3.0.2 for both variants.
+Networking uses the on-board ESP32-C5 Wi-Fi coprocessor over 4-bit SDIO (ESP-Hosted 2.13.x on the host). The C5 must be running ESP-Hosted slave firmware 2.13.x. If you have an existing `sdkconfig` from an earlier build, delete it (or run `idf.py fullclean`) so the Wi-Fi settings in `sdkconfig.defaults` are applied.
 
 For other board options, run ``idf.py menuconfig`` and go to ``Board Support Package(ESP32-P4)``:
 
@@ -78,21 +78,8 @@ To experience video playback, save MJPEG format videos on an SD card and insert 
 ### Build and Flash the Example
 
 Flash the ESP32-P4 application through the board's **USB Serial/JTAG Port** and replace `PORT` with the corresponding serial device.
-Run `idf.py fullclean` before switching between ESP32-C6 and ESP32-C5. Both variants use the default `build` directory.
-
-ESP32-C6 (default):
-
 ```bash
 idf.py -p PORT build flash monitor
-```
-
-ESP32-C5:
-
-```bash
-idf.py fullclean
-idf.py -D SDKCONFIG=build/sdkconfig \
-    -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.p4x_c5" \
-    -p PORT build flash monitor
 ```
 
 These commands flash only ESP32-P4. To update the wireless coprocessor, connect a UART tool to the onboard module programming connector and use the flash arguments supplied with the corresponding firmware package.

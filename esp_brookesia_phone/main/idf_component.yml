@@ -2,8 +2,11 @@
 dependencies:
   idf:
     version: '>=5.5.3'
-  espressif/ethernet_init:
-    version: '*'
+  # Wi-Fi via the on-board ESP32-C5 coprocessor (ESP-Hosted over SDIO)
+  espressif/esp_wifi_remote:
+    version: "1.6.2"
+  espressif/esp_hosted:
+    version: "~2.13.0"
 
   espressif/esp-brookesia:
     version: 0.4.*

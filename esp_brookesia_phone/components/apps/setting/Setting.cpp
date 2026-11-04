@@ -16,8 +16,6 @@
 #include "esp_check.h"
 #include "esp_memory_utils.h"
 #include "esp_mac.h"
-#include "esp_eth.h"
-#include "ethernet_init.h"
 #include "bsp/esp-bsp.h"
 #include "esp_lv_adapter.h"
 #include "bsp_board_extra.h"
@@ -264,9 +262,6 @@ bool AppSettings::init(void)
                     HOME_REFRESH_TASK_PRIORITY, &refresh_task) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create home refresh task");
         return false;
-    }
-    if (initEthernet() != ESP_OK) {
-        ESP_LOGE(TAG, "Init Ethernet failed");
     }
 #if APP_WIFI_ENABLED
     if (xTaskCreate(wifiScanTask, "wifi_scan", WIFI_SCAN_TASK_STACK_SIZE, this,
@@ -549,65 +544,13 @@ static esp_err_t initNetifAndEventLoop(void)
 {
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "esp_netif_init failed");
     esp_err_t ret = esp_event_loop_create_default();
-    // Both Ethernet and Wi-Fi call this; the default loop may already exist
+    // The default loop may already exist
     if ((ret != ESP_OK) && (ret != ESP_ERR_INVALID_STATE)) {
         ESP_LOGE(TAG, "Failed to create default event loop: %s", esp_err_to_name(ret));
         return ret;
     }
 
     return ESP_OK;
-}
-
-esp_err_t AppSettings::initEthernet(void)
-{
-    esp_eth_handle_t *eth_handles = nullptr;
-    uint8_t eth_port_cnt = 0;
-
-    ESP_RETURN_ON_ERROR(initNetifAndEventLoop(), TAG, "Init netif failed");
-    ESP_RETURN_ON_ERROR(ethernet_init_all(&eth_handles, &eth_port_cnt), TAG, "ethernet_init_all failed");
-    if (eth_port_cnt == 0) {
-        ESP_LOGE(TAG, "No Ethernet interface found");
-        return ESP_ERR_NOT_FOUND;
-    }
-
-    // Only the first port is used
-    esp_netif_config_t netif_cfg = ESP_NETIF_DEFAULT_ETH();
-    esp_netif_t *eth_netif = esp_netif_new(&netif_cfg);
-    ESP_RETURN_ON_FALSE(eth_netif != nullptr, ESP_FAIL, TAG, "Failed to create Ethernet netif");
-    ESP_RETURN_ON_ERROR(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handles[0])), TAG,
-                        "Failed to attach Ethernet netif");
-
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, &ethEventHandler, this), TAG,
-                        "Failed to register Ethernet event handler");
-    ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &ethEventHandler, this), TAG,
-                        "Failed to register IP event handler");
-
-    ESP_RETURN_ON_ERROR(esp_eth_start(eth_handles[0]), TAG, "Failed to start Ethernet");
-
-    return ESP_OK;
-}
-
-void AppSettings::ethEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
-{
-    AppSettings *app = (AppSettings *)arg;
-
-    if (s_wifi_event_group == nullptr) {
-        return;
-    }
-
-    // The status bar only has a Wi-Fi icon, so it shows full signal while Ethernet has an IP
-    if (event_base == ETH_EVENT && event_id == ETHERNET_EVENT_CONNECTED) {
-        ESP_LOGI(TAG, "Ethernet link up");
-    } else if (event_base == ETH_EVENT && event_id == ETHERNET_EVENT_DISCONNECTED) {
-        ESP_LOGW(TAG, "Ethernet link down");
-        xEventGroupClearBits(s_wifi_event_group, WIFI_EVENT_CONNECTED);
-        app->_wifi_signal_strength_level = WIFI_SIGNAL_STRENGTH_NONE;
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
-        const ip_event_got_ip_t *got_ip = static_cast<const ip_event_got_ip_t *>(event_data);
-        ESP_LOGI(TAG, "Ethernet got IP " IPSTR, IP2STR(&got_ip->ip_info.ip));
-        app->_wifi_signal_strength_level = WIFI_SIGNAL_STRENGTH_GOOD;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_EVENT_CONNECTED);
-    }
 }
 
 esp_err_t AppSettings::initWifi()
@@ -625,27 +568,28 @@ esp_err_t AppSettings::initWifi()
                          WIFI_EVENT_CONNECTING | WIFI_EVENT_CONNECT_RESULT_BITS |
                          WIFI_EVENT_DISCONNECTING | WIFI_EVENT_DISCONNECTED);
 
-    ESP_ERROR_CHECK(initNetifAndEventLoop());
+    ESP_RETURN_ON_ERROR(initNetifAndEventLoop(), TAG, "Init netif failed");
     esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
-    assert(sta_netif);
+    ESP_RETURN_ON_FALSE(sta_netif != nullptr, ESP_FAIL, TAG, "Failed to create Wi-Fi STA netif");
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    // Fails if the ESP32-C5 coprocessor does not come up; keep the rest of the UI running
+    ESP_RETURN_ON_ERROR(esp_wifi_init(&cfg), TAG, "esp_wifi_init failed (is the ESP32-C5 coprocessor up?)");
 
     esp_event_handler_instance_t instance_any_id;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+    ESP_RETURN_ON_ERROR(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
                                                         &wifiEventHandler,
                                                         this,
-                                                        &instance_any_id));
+                                                        &instance_any_id), TAG, "Failed to register Wi-Fi event handler");
     esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+    ESP_RETURN_ON_ERROR(esp_event_handler_instance_register(IP_EVENT,
                                                         IP_EVENT_STA_GOT_IP,
                                                         &wifiEventHandler,
                                                         this,
-                                                        &instance_got_ip));
+                                                        &instance_got_ip), TAG, "Failed to register Wi-Fi event handler");
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "esp_wifi_set_mode failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "esp_wifi_start failed");
 
     return ESP_OK;
 #endif

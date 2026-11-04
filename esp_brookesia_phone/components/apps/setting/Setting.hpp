@@ -63,8 +63,6 @@ private:
     bool loadNvsParam(void);
     bool setNvsParam(std::string key, int value);
     void updateUiByNvsParam(void);
-    // Ethernet
-    esp_err_t initEthernet(void);
     // WiFi
     esp_err_t initWifi(void);
     void startWifiScan(void);
@@ -79,8 +77,6 @@ private:
     static void wifiConnectTask(void *arg);
 
     /* Event Handler */
-    // Ethernet
-    static void ethEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
     // WiFi
     static void wifiEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 

@@ -5,6 +5,7 @@
  */
 
 #include <string.h>
+#include <inttypes.h>
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_check.h"
@@ -37,7 +38,7 @@
 
 #define CAMERA_INIT_TASK_WAIT_MS            (1000)
 #define DETECT_NUM_MAX                      (10)
-#define FPS_PRINT                           (1)
+#define FPS_PRINT                           (0)
 
 using namespace std;
 
@@ -93,6 +94,16 @@ Camera::~Camera()
 
 bool Camera::run(void)
 {
+    if (_camera_ctlr_handle < 0) {
+        // No sensor was detected at boot; show a message instead of crashing in taskCameraInit()
+        lv_obj_t *label = lv_label_create(lv_scr_act());
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+        lv_label_set_text(label, "Camera not detected\n\nCheck the CSI cable and\nthe serial log for details");
+        lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(label);
+        return true;
+    }
+
     if (_camera_init_sem == NULL) {
         _camera_init_sem = xSemaphoreCreateBinary();
         assert(_camera_init_sem != NULL);
@@ -119,6 +130,8 @@ bool Camera::run(void)
 
     // UI initialization
     ui_camera_init();
+    // The SquareLine canvas is hard-coded to 1280x720; match it to the sensor's actual frame size
+    lv_obj_set_size(ui_ImageCameraShotImage, _hor_res, _ver_res);
 
     // The following is the additional UI initialization
     _img_album_buffer = (uint8_t *)heap_caps_aligned_alloc(128, _img_refresh_dsc.data_size, MALLOC_CAP_SPIRAM);
@@ -232,8 +245,10 @@ bool Camera::close(void)
     xEventGroupClearBits(camera_event_group, CAMERA_EVENT_PED_DETECT);
     xEventGroupClearBits(camera_event_group, CAMERA_EVENT_HUMAN_DETECT);
 
-    app_video_stream_task_stop(_camera_ctlr_handle);
-    app_video_stream_wait_stop();
+    if (_camera_ctlr_handle >= 0) {
+        app_video_stream_task_stop(_camera_ctlr_handle);
+        app_video_stream_wait_stop();
+    }
 
     if (_img_album_buffer) {
         heap_caps_free(_img_album_buffer);
@@ -260,13 +275,27 @@ bool Camera::init(void)
     // Open the video device
     _camera_ctlr_handle = app_video_open(EXAMPLE_CAM_DEV_PATH, APP_VIDEO_FMT_RGB565);
     if (_camera_ctlr_handle < 0) {
-        ESP_LOGE(TAG, "video cam open failed");
+        ESP_LOGE(TAG, "video cam open failed - no camera sensor answered on the SCCB (I2C) bus");
 
         if (ESP_OK == i2c_master_probe(i2c_bus_handle, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS, 100) || ESP_OK == i2c_master_probe(i2c_bus_handle, ESP_LCD_TOUCH_IO_I2C_GT911_ADDRESS_BACKUP, 100)) {
             ESP_LOGI(TAG, "gt911 touch found");
         } else {
             ESP_LOGE(TAG, "Touch not found");
         }
+        // Keep the app installed (so the phone UI still boots), but skip buffer/pipeline setup
+        return true;
+    }
+
+    // Size all buffers from the format the sensor actually delivers, not the constructor's guess
+    uint32_t cam_w = 0, cam_h = 0;
+    app_video_get_resolution(&cam_w, &cam_h);
+    if ((cam_w != _hor_res) || (cam_h != _ver_res)) {
+        ESP_LOGW(TAG, "Sensor resolution is %" PRIu32 "x%" PRIu32 " (requested %dx%d), using sensor resolution",
+                 cam_w, cam_h, _hor_res, _ver_res);
+        _hor_res = cam_w;
+        _ver_res = cam_h;
+        _img_album_dsc_size = (_hor_res > _ver_res) ? _ver_res : _hor_res;
+        _img_album_buf_bytes = _img_album_dsc_size * _img_album_dsc_size * sizeof(lv_color_t);
     }
 
     ESP_ERROR_CHECK(esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &data_cache_line_size));
@@ -511,8 +540,10 @@ static void camera_video_frame_operation(uint8_t *camera_buf, uint8_t camera_buf
             lv_canvas_set_buffer(ui_ImageCameraShotImage, camera_buf,
                                camera_buf_hes, camera_buf_ves,
                                LV_IMG_CF_TRUE_COLOR);
+            // Let the LVGL task render it. Calling lv_refr_now() here deadlocks: the display adapter's
+            // flush waits for a buffer-free notification that its ISR only sends to the LVGL task.
+            lv_obj_invalidate(ui_ImageCameraShotImage);
         }
-        lv_refr_now(NULL);
         esp_lv_adapter_unlock();
     }
 

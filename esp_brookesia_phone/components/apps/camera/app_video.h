@@ -101,6 +101,16 @@ esp_err_t app_video_get_bufs(int fb_num, void **fb);
 uint32_t app_video_get_buf_size(void);
 
 /**
+ * @brief Get the frame resolution reported by the sensor when the device was opened.
+ *
+ * Only valid after a successful app_video_open().
+ *
+ * @param width  Output frame width in pixels.
+ * @param height Output frame height in pixels.
+ */
+void app_video_get_resolution(uint32_t *width, uint32_t *height);
+
+/**
  * @brief Start the video stream task.
  *
  * Initiates the video streaming by starting the video stream and creating

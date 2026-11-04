@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "linux/videodev2.h"
 #include "esp_video_init.h"
+#include "esp_video_ioctl.h"
 #include "app_video.h"
 
 static const char *TAG = "app_video";
@@ -24,6 +25,7 @@ static const char *TAG = "app_video";
 #define MIN_BUFFER_COUNT                (2)
 #define VIDEO_TASK_STACK_SIZE           (4 * 1024)
 #define VIDEO_TASK_PRIORITY             (3)
+#define VIDEO_DQBUF_TIMEOUT_MS          (2000)
 
 typedef enum {
     VIDEO_TASK_DELETE = BIT(0),
@@ -248,6 +250,12 @@ esp_err_t app_video_get_bufs(int fb_num, void **fb)
     return ESP_OK;
 }
 
+void app_video_get_resolution(uint32_t *width, uint32_t *height)
+{
+    *width = app_camera_video.camera_buf_hes;
+    *height = app_camera_video.camera_buf_ves;
+}
+
 uint32_t app_video_get_buf_size(void)
 {
     uint32_t buf_size = app_camera_video.camera_buf_hes * app_camera_video.camera_buf_ves * (APP_VIDEO_FMT == APP_VIDEO_FMT_RGB565 ? 2 : 3);
@@ -263,7 +271,6 @@ static inline esp_err_t video_receive_video_frame(int video_fd)
 
     int res = ioctl(video_fd, VIDIOC_DQBUF, &(app_camera_video.v4l2_buf));
     if (res != 0) {
-        ESP_LOGE(TAG, "failed to receive video frame");
         goto errout;
     }
 
@@ -306,6 +313,15 @@ static inline esp_err_t video_stream_start(int video_fd)
 {
     ESP_LOGI(TAG, "Video Stream Start");
 
+    // Don't block forever in VIDIOC_DQBUF if the sensor never delivers a frame
+    struct timeval dqbuf_timeout = {
+        .tv_sec = VIDEO_DQBUF_TIMEOUT_MS / 1000,
+        .tv_usec = (VIDEO_DQBUF_TIMEOUT_MS % 1000) * 1000,
+    };
+    if (ioctl(video_fd, VIDIOC_S_DQBUF_TIMEOUT, &dqbuf_timeout) != 0) {
+        ESP_LOGW(TAG, "failed to set DQBUF timeout");
+    }
+
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(video_fd, VIDIOC_STREAMON, &type)) {
         ESP_LOGE(TAG, "failed to start stream");
@@ -345,14 +361,27 @@ errout:
 
 static void video_stream_task(void *arg)
 {
-    int video_fd = *((int *)arg);
+    int video_fd = (int)(intptr_t)arg;
+    uint32_t frame_count = 0;
+    uint32_t timeout_count = 0;
 
     while (1) {
-        ESP_ERROR_CHECK(video_receive_video_frame(video_fd));
+        if (video_receive_video_frame(video_fd) == ESP_OK) {
+            if (frame_count++ == 0) {
+                ESP_LOGI(TAG, "First frame received from MIPI-CSI (%" PRIu32 "x%" PRIu32 ")",
+                         app_camera_video.camera_buf_hes, app_camera_video.camera_buf_ves);
+            }
+            timeout_count = 0;
 
-        video_operation_video_frame(video_fd);
+            video_operation_video_frame(video_fd);
 
-        ESP_ERROR_CHECK(video_free_video_frame(video_fd));
+            ESP_ERROR_CHECK(video_free_video_frame(video_fd));
+        } else {
+            timeout_count++;
+            ESP_LOGE(TAG, "No frame from MIPI-CSI after %d ms (%" PRIu32 " frames so far, %" PRIu32 " timeouts in a row). "
+                     "Sensor is answering on I2C but the CSI receiver is not getting data - check CSI lanes/clock/cable",
+                     VIDEO_DQBUF_TIMEOUT_MS, frame_count, timeout_count);
+        }
 
         if(xEventGroupGetBits(app_camera_video.video_event_group) & VIDEO_TASK_DELETE) {
             xEventGroupClearBits(app_camera_video.video_event_group, VIDEO_TASK_DELETE);
@@ -372,7 +401,7 @@ esp_err_t app_video_stream_task_start(int video_fd, int core_id)
 
     video_stream_start(video_fd);
 
-    BaseType_t result = xTaskCreatePinnedToCore(video_stream_task, "video stream task", VIDEO_TASK_STACK_SIZE, &video_fd, VIDEO_TASK_PRIORITY, &app_camera_video.video_stream_task_handle, core_id);
+    BaseType_t result = xTaskCreatePinnedToCore(video_stream_task, "video stream task", VIDEO_TASK_STACK_SIZE, (void *)(intptr_t)video_fd, VIDEO_TASK_PRIORITY, &app_camera_video.video_stream_task_handle, core_id);
 
     if (result != pdPASS) {
         ESP_LOGE(TAG, "failed to create video stream task");
