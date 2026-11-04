@@ -1,0 +1,31 @@
+menu "Waveshare DSI panel"
+    choice WS_PANEL_TYPE
+        prompt "Panel"
+        default WS_PANEL_AUTO
+        help
+            Auto reads the resolution stored in the GT911 touch controller's
+            configuration (480x800 vs 1024x600) after the panel MCU powers it up.
+        config WS_PANEL_AUTO
+            bool "Auto-detect"
+        config WS_PANEL_FORCE_4_3_A
+            bool "4.3-DSI-TOUCH-A (ST7701S, 480x800)"
+        config WS_PANEL_FORCE_7_C
+            bool "7-DSI-TOUCH-C (EK79007, 1024x600)"
+    endchoice
+
+    config WS_PANEL_I2C_SDA
+        int "I2C SDA GPIO (DSI connector)"
+        default 26
+        help
+            SparkFun IoT RedBoard ESP32-P4: IO26 -> J6 pin 2.
+    config WS_PANEL_I2C_SCL
+        int "I2C SCL GPIO (DSI connector)"
+        default 27
+        help
+            SparkFun IoT RedBoard ESP32-P4: IO27 -> J6 pin 3.
+    config WS_PANEL_LDO_CHAN
+        int "Internal LDO channel feeding VDD_MIPI_DPHY (-1 = external)"
+        default 3
+        help
+            RedBoard ESP32-P4: VDDO_3 -> VDD_MIPI.
+endmenu

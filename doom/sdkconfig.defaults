@@ -1,0 +1,33 @@
+# --- Doom defaults: SparkFun IoT RedBoard - ESP32-P4 ---
+CONFIG_IDF_TARGET="esp32p4"
+
+# 16 MB W25Q128JV flash (U4)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# In-package PSRAM holds the two frame buffers (up to 1024x600 RGB888, 1.8 MB each)
+# and Doom's heap.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Logs over the USB-C labelled for programming (J2 = P4 USB-Serial/JTAG).
+# UART0 (IO37/38) only goes to the J9 header, there is no USB-UART bridge.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Speed
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# Display: Waveshare 4.3-DSI-TOUCH-A or 7-DSI-TOUCH-C (auto-detected). Panel MCU (0x45)
+# + GT911 touch (0x5D) on IO26/IO27 via J6 pins 2/3 (shared with Qwiic). VDD_MIPI from LDO VO3.
+CONFIG_WS_PANEL_I2C_SDA=26
+CONFIG_WS_PANEL_I2C_SCL=27
+CONFIG_WS_PANEL_LDO_CHAN=3
+
+# App + read-only FAT partition holding DOOM1.WAD
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Up to 5 touch points (move + shoot at once)
+CONFIG_ESP_LCD_TOUCH_MAX_POINTS=5
+CONFIG_FATFS_LFN_HEAP=y

@@ -1,0 +1,16 @@
+menu "Doom"
+    config DOOM_FLIP
+        bool "Flip the picture 180 degrees"
+        default n
+        help
+            Use this if your panel is mounted the other way up.
+    config DOOM_JOY_INVERT_X
+        bool "Qwiic Joystick: invert left/right"
+        default n
+    config DOOM_JOY_INVERT_Y
+        bool "Qwiic Joystick: invert forward/back (default: push away = forward)"
+        default n
+    config DOOM_JOY_BUTTON_ACTIVE_HIGH
+        bool "Qwiic Joystick: button register reads 1 when pressed"
+        default n
+endmenu
