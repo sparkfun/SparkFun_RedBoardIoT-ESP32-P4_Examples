@@ -13,9 +13,6 @@
 
 static PedestrianDetect *detect = NULL;
 
-#define WIDTH  1280
-#define HEIGHT 720
-
 std::list<dl::detect::result_t> app_pedestrian_detect(uint16_t *frame, int width, int height)
 {
     dl::image::img_t img;
@@ -72,7 +69,7 @@ void draw_rectangle_rgb(uint16_t *buffer, int width, int height, int x1, int y1,
 }
 
 
-static void draw_large_green_point(uint16_t *buffer, int x, int y) {
+static void draw_large_green_point(uint16_t *buffer, int width, int height, int x, int y) {
     uint16_t green = 0x07E0; 
     
     for (int dx = -3; dx <= 3; ++dx) {
@@ -80,20 +77,20 @@ static void draw_large_green_point(uint16_t *buffer, int x, int y) {
             int nx = x + dx;
             int ny = y + dy;
 
-            if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
-                buffer[ny * WIDTH + nx] = green;
+            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                buffer[ny * width + nx] = green;
             }
         }
     }
 }
 
-void draw_green_points(uint16_t *buffer, const std::vector<int> &landmarks) 
+void draw_green_points(uint16_t *buffer, int width, int height, const std::vector<int> &landmarks)
 {
     for (int i = 0; i < 5; i++) {
         int x = landmarks[2 * i];     
         int y = landmarks[2 * i + 1]; 
 
-        draw_large_green_point(buffer, x, y);
+        draw_large_green_point(buffer, width, height, x, y);
     }
 }
 

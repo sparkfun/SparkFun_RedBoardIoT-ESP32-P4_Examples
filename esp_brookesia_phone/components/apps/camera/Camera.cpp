@@ -528,7 +528,7 @@ static void camera_video_frame_operation(uint8_t *camera_buf, uint8_t camera_buf
                 if ((current_bits & CAMERA_EVENT_HUMAN_DETECT) &&
                     i < detect_keypoints.size() &&
                     detect_keypoints[i].size() >= 10) {
-                    draw_green_points(rgb_buf, detect_keypoints[i]);
+                    draw_green_points(rgb_buf, camera_buf_hes, camera_buf_ves, detect_keypoints[i]);
                 }
             }
         }
